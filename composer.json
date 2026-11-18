@@ -1,0 +1,54 @@
+{
+    "name": "websvc/yii2-audit",
+    "description": "Records ActiveRecord changes and write requests of Yii2 applications in a dedicated audit database.",
+    "type": "yii2-extension",
+    "keywords": [
+        "yii2",
+        "audit",
+        "audit trail",
+        "activerecord",
+        "change log"
+    ],
+    "license": "BSD-3-Clause",
+    "authors": [
+        {
+            "name": "websvcPT",
+            "homepage": "https://github.com/websvcPT"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/websvcPT/yii2-audit/issues",
+        "source": "https://github.com/websvcPT/yii2-audit"
+    },
+    "require": {
+        "php": ">=8.1",
+        "yiisoft/yii2": "~2.0.45"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5",
+        "squizlabs/php_codesniffer": "^3.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "websvc\\audit\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "websvc\\audit\\tests\\": "tests/"
+        }
+    },
+    "repositories": [
+        {
+            "type": "composer",
+            "url": "https://asset-packagist.org"
+        }
+    ],
+    "minimum-stability": "stable",
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "yiisoft/yii2-composer": true
+        }
+    }
+}

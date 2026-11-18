@@ -1,0 +1,7 @@
+CREATE DATABASE IF NOT EXISTS audit_app CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS audit_log CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE USER IF NOT EXISTS 'audit'@'%' IDENTIFIED BY 'audit';
+GRANT ALL PRIVILEGES ON audit_app.* TO 'audit'@'%';
+GRANT ALL PRIVILEGES ON audit_log.* TO 'audit'@'%';
+FLUSH PRIVILEGES;

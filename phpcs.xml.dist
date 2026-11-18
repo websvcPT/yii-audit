@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ruleset name="yii2-audit">
+    <description>PSR-12 with a 120 column limit.</description>
+
+    <file>src</file>
+    <file>tests</file>
+
+    <exclude-pattern>tests/runtime/*</exclude-pattern>
+
+    <arg name="extensions" value="php"/>
+    <arg name="colors"/>
+    <arg value="sp"/>
+
+    <rule ref="PSR12"/>
+
+    <rule ref="Generic.Files.LineLength">
+        <properties>
+            <property name="lineLimit" value="120"/>
+            <property name="absoluteLineLimit" value="120"/>
+        </properties>
+    </rule>
+
+    <rule ref="PSR1.Files.SideEffects">
+        <exclude-pattern>src/views/*</exclude-pattern>
+        <exclude-pattern>tests/bootstrap.php</exclude-pattern>
+    </rule>
+</ruleset>
