@@ -2,11 +2,17 @@
 
 namespace websvc\audit;
 
+use Throwable;
+use websvc\audit\components\ChangeBuilder;
 use Yii;
 use yii\base\BootstrapInterface;
 use yii\base\Component;
+use yii\db\BaseActiveRecord;
 use yii\db\Connection;
 use yii\di\Instance;
+use yii\web\Application as WebApplication;
+use yii\web\IdentityInterface;
+use yii\web\User;
 
 /**
  * Records ActiveRecord changes and write requests.
@@ -119,6 +125,8 @@ class Audit extends Component implements BootstrapInterface
 
     private ?string $requestId = null;
 
+    private int $changeCount = 0;
+
     public function init(): void
     {
         parent::init();
@@ -167,5 +175,174 @@ class Audit extends Component implements BootstrapInterface
         }
 
         return $this->requestId;
+    }
+
+    /**
+     * Number of change rows written during this request.
+     */
+    public function getChangeCount(): int
+    {
+        return $this->changeCount;
+    }
+
+    /**
+     * Writes one change row through the model's own connection, so the row shares the model's transaction.
+     *
+     * @param array $changedAttributes old values of the changed attributes, as given by `afterSave()`
+     * @param string[] $ignoreAttributes added to the component's `ignoreAttributes`
+     * @param string[] $maskAttributes added to the component's `maskAttributes`
+     */
+    public function recordChange(
+        BaseActiveRecord $model,
+        string $action,
+        array $changedAttributes,
+        array $ignoreAttributes = [],
+        array $maskAttributes = []
+    ): void {
+        $db = $model::getDb();
+        if (!$db instanceof Connection) {
+            return;
+        }
+
+        try {
+            $builder = new ChangeBuilder(
+                array_merge($this->ignoreAttributes, $ignoreAttributes),
+                array_merge($this->maskAttributes, $maskAttributes)
+            );
+            $attributes = $model->getAttributes();
+            if ($action === self::ACTION_INSERT) {
+                $changes = $builder->build($action, [], $attributes);
+            } elseif ($action === self::ACTION_DELETE) {
+                $changes = $builder->build($action, $attributes, []);
+            } else {
+                $changes = $builder->build(
+                    $action,
+                    $changedAttributes,
+                    array_intersect_key($attributes, $changedAttributes)
+                );
+            }
+            if ($changes === null) {
+                return;
+            }
+
+            [$userId, $userName] = $this->currentUser();
+            $this->insertRow($db, self::TABLE_CHANGES, [
+                'request_id' => $this->getRequestId(),
+                'created_at' => gmdate('Y-m-d H:i:s'),
+                'app_id' => $this->appId(),
+                'user_id' => $userId,
+                'user_name' => $userName,
+                'action' => $action,
+                'model_class' => get_class($model),
+                'table_name' => $db->getSchema()->getRawTableName($model::tableName()),
+                'record_id' => $this->recordId($model),
+                'changes' => $this->encodeJson($changes),
+            ]);
+            $this->changeCount++;
+        } catch (Throwable $e) {
+            $this->handleError($e);
+        }
+    }
+
+    /**
+     * Inserts with plain SQL, so no table schema has to be loaded.
+     */
+    protected function insertRow(Connection $db, string $table, array $row): void
+    {
+        $columns = [];
+        $params = [];
+        foreach ($row as $name => $value) {
+            $columns[] = $db->quoteColumnName($name);
+            $params[':' . $name] = $value;
+        }
+
+        $sql = 'INSERT INTO ' . $db->quoteTableName($this->tableName($table))
+            . ' (' . implode(', ', $columns) . ') VALUES (' . implode(', ', array_keys($params)) . ')';
+        $db->createCommand($sql, $params)->execute();
+    }
+
+    protected function encodeJson(array $value): string
+    {
+        return json_encode(
+            $value,
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR
+        );
+    }
+
+    protected function handleError(Throwable $e): void
+    {
+        if (!$this->failSilently) {
+            throw $e;
+        }
+        Yii::error('Audit write failed: ' . get_class($e) . ': ' . $e->getMessage(), 'audit');
+    }
+
+    protected function appId(): string
+    {
+        return Yii::$app !== null ? mb_substr((string) Yii::$app->id, 0, 64) : '';
+    }
+
+    /**
+     * @return array{0: ?string, 1: ?string} user id and user name of the logged-in user
+     */
+    protected function currentUser(): array
+    {
+        $app = Yii::$app;
+        if ($app === null || !$app->has('user')) {
+            return [null, null];
+        }
+        $user = $app->get('user', false);
+        if (!$user instanceof User) {
+            return [null, null];
+        }
+
+        // Only web requests may load the identity from the session or cookie here
+        $identity = $user->getIdentity($app instanceof WebApplication);
+        if ($identity === null) {
+            return [null, null];
+        }
+
+        $id = $identity->getId();
+        $name = $this->userName($identity);
+
+        return [
+            $id === null ? null : mb_substr((string) $id, 0, 64),
+            $name === null ? null : mb_substr($name, 0, 255),
+        ];
+    }
+
+    private function userName(IdentityInterface $identity): ?string
+    {
+        if ($this->userNameCallback !== null) {
+            $name = call_user_func($this->userNameCallback, $identity);
+
+            return $name === null ? null : (string) $name;
+        }
+
+        return isset($identity->username) ? (string) $identity->username : null;
+    }
+
+    private function recordId(BaseActiveRecord $model): ?string
+    {
+        try {
+            $keys = $model::primaryKey();
+        } catch (Throwable $e) {
+            return null;
+        }
+        if ($keys === []) {
+            return null;
+        }
+
+        $values = [];
+        foreach ($keys as $key) {
+            $values[$key] = $model->getAttribute($key);
+        }
+        if (count($values) === 1) {
+            $value = reset($values);
+
+            return $value === null ? null : mb_substr((string) $value, 0, 255);
+        }
+
+        return mb_substr($this->encodeJson($values), 0, 255);
     }
 }
