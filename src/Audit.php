@@ -3,10 +3,15 @@
 namespace websvc\audit;
 
 use Throwable;
+use websvc\audit\behaviors\AuditBehavior;
 use websvc\audit\components\ChangeBuilder;
+use websvc\audit\models\AuditChange;
+use websvc\audit\models\AuditRequest;
 use Yii;
 use yii\base\BootstrapInterface;
 use yii\base\Component;
+use yii\base\Event;
+use yii\db\AfterSaveEvent;
 use yii\db\BaseActiveRecord;
 use yii\db\Connection;
 use yii\di\Instance;
@@ -28,6 +33,12 @@ class Audit extends Component implements BootstrapInterface
     public const ACTION_INSERT = 'insert';
     public const ACTION_UPDATE = 'update';
     public const ACTION_DELETE = 'delete';
+
+    private const MODEL_EVENTS = [
+        BaseActiveRecord::EVENT_AFTER_INSERT,
+        BaseActiveRecord::EVENT_AFTER_UPDATE,
+        BaseActiveRecord::EVENT_AFTER_DELETE,
+    ];
 
     /**
      * Application component id used by models, migrations and behaviors to find the component.
@@ -150,6 +161,33 @@ class Audit extends Component implements BootstrapInterface
 
     public function bootstrap($app): void
     {
+        if ($this->trackAllModels) {
+            foreach (self::MODEL_EVENTS as $name) {
+                Event::on(BaseActiveRecord::class, $name, [$this, 'handleModelEvent']);
+            }
+        }
+    }
+
+    /**
+     * Class-level handler used when every model is tracked.
+     */
+    public function handleModelEvent(Event $event): void
+    {
+        $model = $event->sender;
+        if (!$model instanceof BaseActiveRecord || $this->isSkippedModel($model)) {
+            return;
+        }
+
+        $changedAttributes = $event instanceof AfterSaveEvent ? $event->changedAttributes : [];
+        if ($event->name === BaseActiveRecord::EVENT_AFTER_INSERT) {
+            $this->recordChange($model, self::ACTION_INSERT, $changedAttributes);
+        } elseif ($event->name === BaseActiveRecord::EVENT_AFTER_UPDATE) {
+            if ($changedAttributes !== []) {
+                $this->recordChange($model, self::ACTION_UPDATE, $changedAttributes);
+            }
+        } elseif ($event->name === BaseActiveRecord::EVENT_AFTER_DELETE) {
+            $this->recordChange($model, self::ACTION_DELETE, []);
+        }
     }
 
     public function getDb(): Connection
@@ -320,6 +358,29 @@ class Audit extends Component implements BootstrapInterface
         }
 
         return isset($identity->username) ? (string) $identity->username : null;
+    }
+
+    /**
+     * Models skipped in global mode: the package's own models, excluded classes, and models that carry an
+     * AuditBehavior (the behavior records them).
+     */
+    private function isSkippedModel(BaseActiveRecord $model): bool
+    {
+        if ($model instanceof AuditChange || $model instanceof AuditRequest) {
+            return true;
+        }
+        foreach ($this->excludeModels as $class) {
+            if (is_a($model, $class)) {
+                return true;
+            }
+        }
+        foreach ($model->getBehaviors() as $behavior) {
+            if ($behavior instanceof AuditBehavior) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function recordId(BaseActiveRecord $model): ?string
