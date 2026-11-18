@@ -198,6 +198,11 @@ abstract class TestCase extends BaseTestCase
             'vendorPath' => dirname(__DIR__) . '/vendor',
             'runtimePath' => __DIR__ . '/runtime',
             'timeZone' => 'Europe/Lisbon',
+            // The application resets these to vendor/bower and vendor/npm; asset-packagist uses -asset folders
+            'aliases' => [
+                '@bower' => dirname(__DIR__) . '/vendor/bower-asset',
+                '@npm' => dirname(__DIR__) . '/vendor/npm-asset',
+            ],
             'components' => [
                 'db' => [
                     'class' => Connection::class,

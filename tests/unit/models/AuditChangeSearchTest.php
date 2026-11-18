@@ -18,7 +18,7 @@ class AuditChangeSearchTest extends TestCase
         $rows = [
             [1, '7', 'ana', 'app-a', 'insert', 'app\models\Post', '1', 'r1', ['title'], '2026-07-01 23:30:00'],
             [2, '8', 'bruno', 'app-b', 'update', 'app\models\Note', '2', 'r2', ['body'], '2026-07-03 10:00:00'],
-            [3, '9', 'diana', 'app-a', 'delete', 'app\models\Post', '3', 'r3', ['title', 'body'], '2026-06-30 10:00:00'],
+            [3, '9', 'diana', 'app-a', 'delete', 'app\models\Post', '3', 'r3', ['title', 'body'], '2026-06-30 10:00'],
         ];
         foreach ($rows as [$id, $userId, $userName, $appId, $action, $class, $recordId, $requestId, $fields, $at]) {
             $changes = [];
