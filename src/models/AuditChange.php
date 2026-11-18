@@ -2,8 +2,10 @@
 
 namespace websvc\audit\models;
 
+use Throwable;
 use websvc\audit\Audit;
 use Yii;
+use yii\base\Model;
 use yii\db\ActiveQuery;
 use yii\db\ActiveRecord;
 use yii\db\Connection;
@@ -27,6 +29,11 @@ use yii\db\Connection;
 class AuditChange extends ActiveRecord
 {
     use JsonValueTrait;
+
+    /**
+     * @var array<string, Model|null> one instance per recorded model class, used for attribute labels
+     */
+    private static array $labelModels = [];
 
     public static function getDb(): Connection
     {
@@ -74,5 +81,34 @@ class AuditChange extends ActiveRecord
     public function getChangedAttributeNames(): array
     {
         return array_keys($this->getChangesArray());
+    }
+
+    /**
+     * Label of a changed attribute as the recorded model defines it, or the attribute name when the model class is
+     * gone or cannot be created.
+     */
+    public function getRecordAttributeLabel(string $attribute): string
+    {
+        $class = (string) $this->model_class;
+        if (!array_key_exists($class, self::$labelModels)) {
+            self::$labelModels[$class] = null;
+            try {
+                if (class_exists($class) && is_subclass_of($class, Model::class)) {
+                    self::$labelModels[$class] = $class::instance();
+                }
+            } catch (Throwable $e) {
+                // Keep the raw attribute name
+            }
+        }
+
+        $model = self::$labelModels[$class];
+        if ($model === null) {
+            return $attribute;
+        }
+        try {
+            return (string) $model->getAttributeLabel($attribute);
+        } catch (Throwable $e) {
+            return $attribute;
+        }
     }
 }

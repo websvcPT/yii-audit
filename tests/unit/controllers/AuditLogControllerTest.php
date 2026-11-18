@@ -5,6 +5,7 @@ namespace websvc\audit\tests\unit\controllers;
 use ReflectionMethod;
 use websvc\audit\controllers\AuditLogController;
 use websvc\audit\tests\data\controllers\OpenAuditLogController;
+use websvc\audit\tests\data\models\Post;
 use websvc\audit\tests\TestCase;
 use Yii;
 use yii\web\ForbiddenHttpException;
@@ -57,6 +58,82 @@ class AuditLogControllerTest extends TestCase
         $this->assertStringContainsString('Draft', $output);
         $this->assertStringContainsString('Paid', $output);
         $this->assertStringContainsString('***', $output);
+    }
+
+    public function testViewSummarizesRequestAndHidesEmptyFields(): void
+    {
+        $this->insertAuditRow('audit_requests', [
+            'request_id' => 'c1',
+            'created_at' => '2026-07-01 10:00:00',
+            'app_id' => 'console',
+            'method' => 'CLI',
+            'route' => 'import/run',
+            'url' => '',
+            'params' => ['args' => []],
+            'status_code' => 0,
+            'duration_ms' => 123,
+        ]);
+
+        $output = Yii::$app->runAction('audit-log/view', ['id' => 'c1']);
+
+        $this->assertStringContainsString('class="audit-log-summary"', $output);
+        $this->assertStringContainsString('import/run', $output);
+        $this->assertStringContainsString('123 ms', $output);
+        $this->assertStringContainsString(Yii::t('audit', 'System (no user)'), $output);
+        $this->assertStringNotContainsString(Yii::t('audit', '(not set)'), $output);
+    }
+
+    public function testViewShowsParamsAsKeyValueLines(): void
+    {
+        $this->seed();
+
+        $output = Yii::$app->runAction('audit-log/view', ['id' => 'r1']);
+
+        $this->assertStringContainsString('post.Invoice.status', $output);
+        $this->assertStringContainsString('post.password', $output);
+    }
+
+    public function testViewListsChangesInOneTable(): void
+    {
+        $this->seed();
+        $this->insertAuditRow('audit_changes', [
+            'request_id' => 'r1',
+            'created_at' => '2026-07-01 10:00:01',
+            'app_id' => 'backend',
+            'action' => 'insert',
+            'model_class' => 'app\models\InvoiceLine',
+            'table_name' => 'invoice_lines',
+            'record_id' => '7',
+            'changes' => ['qty' => ['old' => null, 'new' => 3], 'price' => ['old' => null, 'new' => '9.90']],
+        ]);
+
+        $output = Yii::$app->runAction('audit-log/view', ['id' => 'r1']);
+
+        $this->assertSame(1, substr_count($output, 'audit-log-changes'));
+        $this->assertStringContainsString('rowspan="2"', $output);
+        $this->assertStringContainsString('InvoiceLine', $output);
+        $this->assertStringContainsString('9.90', $output);
+    }
+
+    public function testViewUsesModelAttributeLabels(): void
+    {
+        $this->seed();
+        $this->insertAuditRow('audit_changes', [
+            'request_id' => 'r1',
+            'created_at' => '2026-07-01 10:00:01',
+            'app_id' => 'backend',
+            'action' => 'update',
+            'model_class' => Post::class,
+            'table_name' => 'posts',
+            'record_id' => '1',
+            'changes' => ['title' => ['old' => 'A', 'new' => 'B']],
+        ]);
+
+        $output = Yii::$app->runAction('audit-log/view', ['id' => 'r1']);
+
+        // Generated label of the existing test model; unknown classes keep the raw name
+        $this->assertStringContainsString('Title', $output);
+        $this->assertStringContainsString('status', $output);
     }
 
     public function testViewUnknownIdThrowsNotFound(): void
