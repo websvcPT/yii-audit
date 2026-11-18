@@ -35,7 +35,7 @@ class AuditControllerTest extends TestCase
         $rows = [];
         $old = gmdate('Y-m-d H:i:s', time() - 400 * 86400);
         for ($i = 0; $i < 2500; $i++) {
-            $rows[] = ['r' . $i, $old, 'backend', 'insert', 'app\models\Invoice', 'invoices', '{"a":{"old":null,"new":1}}'];
+            $rows[] = ['r' . $i, $old, 'backend', 'insert', 'app\models\Invoice', 'invoices', '{"a":1}'];
         }
         $this->db()->createCommand()->batchInsert(
             $this->auditDatabase() . '.audit_changes',
