@@ -159,6 +159,14 @@ abstract class TestCase extends BaseTestCase
         );
     }
 
+    /**
+     * Inserts a row into an audit table of the audit database. JSON columns take arrays.
+     */
+    protected function insertAuditRow(string $table, array $row): void
+    {
+        $this->db()->createCommand()->insert($this->auditDatabase() . '.' . $table, $row)->execute();
+    }
+
     protected function appDatabase(): string
     {
         return getenv('DB_APP') ?: 'audit_app';

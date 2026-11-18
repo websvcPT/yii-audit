@@ -19,6 +19,7 @@ use yii\db\AfterSaveEvent;
 use yii\db\BaseActiveRecord;
 use yii\db\Connection;
 use yii\di\Instance;
+use yii\i18n\PhpMessageSource;
 use yii\web\Application as WebApplication;
 use yii\web\IdentityInterface;
 use yii\web\Response;
@@ -156,6 +157,26 @@ class Audit extends Component implements BootstrapInterface
     {
         parent::init();
         Yii::setAlias('@websvc/audit', __DIR__);
+        $this->registerTranslations();
+    }
+
+    /**
+     * Registers the `audit` translation category unless the application already configured it.
+     */
+    protected function registerTranslations(): void
+    {
+        if (Yii::$app === null) {
+            return;
+        }
+        $i18n = Yii::$app->getI18n();
+        if (isset($i18n->translations['audit']) || isset($i18n->translations['audit*'])) {
+            return;
+        }
+        $i18n->translations['audit'] = [
+            'class' => PhpMessageSource::class,
+            'sourceLanguage' => 'en-US',
+            'basePath' => '@websvc/audit/messages',
+        ];
     }
 
     /**
