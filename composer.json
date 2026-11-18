@@ -1,6 +1,6 @@
 {
     "name": "websvc/yii2-audit",
-    "description": "Records ActiveRecord changes and write requests of Yii2 applications in a dedicated audit database.",
+    "description": "Records ActiveRecord changes and write requests of Yii2 apps in a dedicated audit database.",
     "type": "yii2-extension",
     "keywords": [
         "yii2",

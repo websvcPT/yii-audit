@@ -56,7 +56,13 @@ class ParamsMaskerTest extends TestCase
     public function testDescribeFilesFlattensSingleAndMultiple(): void
     {
         $files = [
-            'doc' => ['name' => 'a.pdf', 'type' => 'application/pdf', 'tmp_name' => '/tmp/a', 'error' => 0, 'size' => 10],
+            'doc' => [
+                'name' => 'a.pdf',
+                'type' => 'application/pdf',
+                'tmp_name' => '/tmp/a',
+                'error' => 0,
+                'size' => 10,
+            ],
             'Model' => [
                 'name' => ['files' => ['a.png', 'b.png']],
                 'type' => ['files' => ['image/png', 'image/png']],

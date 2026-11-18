@@ -5,18 +5,23 @@ namespace websvc\audit;
 use Throwable;
 use websvc\audit\behaviors\AuditBehavior;
 use websvc\audit\components\ChangeBuilder;
+use websvc\audit\components\ParamsMasker;
 use websvc\audit\models\AuditChange;
 use websvc\audit\models\AuditRequest;
 use Yii;
+use yii\base\Application;
 use yii\base\BootstrapInterface;
 use yii\base\Component;
 use yii\base\Event;
+use yii\console\Request as ConsoleRequest;
+use yii\console\Response as ConsoleResponse;
 use yii\db\AfterSaveEvent;
 use yii\db\BaseActiveRecord;
 use yii\db\Connection;
 use yii\di\Instance;
 use yii\web\Application as WebApplication;
 use yii\web\IdentityInterface;
+use yii\web\Response;
 use yii\web\User;
 
 /**
@@ -33,6 +38,11 @@ class Audit extends Component implements BootstrapInterface
     public const ACTION_INSERT = 'insert';
     public const ACTION_UPDATE = 'update';
     public const ACTION_DELETE = 'delete';
+
+    /**
+     * Method stored for console runs.
+     */
+    public const METHOD_CLI = 'CLI';
 
     private const MODEL_EVENTS = [
         BaseActiveRecord::EVENT_AFTER_INSERT,
@@ -138,6 +148,10 @@ class Audit extends Component implements BootstrapInterface
 
     private int $changeCount = 0;
 
+    private bool $requestRecorded = false;
+
+    private ?float $startedAt = null;
+
     public function init(): void
     {
         parent::init();
@@ -161,11 +175,71 @@ class Audit extends Component implements BootstrapInterface
 
     public function bootstrap($app): void
     {
+        $this->startedAt = microtime(true);
+
         if ($this->trackAllModels) {
             foreach (self::MODEL_EVENTS as $name) {
                 Event::on(BaseActiveRecord::class, $name, [$this, 'handleModelEvent']);
             }
         }
+
+        if ($app instanceof WebApplication) {
+            // Also fires when the error handler sends an error page
+            $app->getResponse()->on(Response::EVENT_AFTER_SEND, [$this, 'recordRequest']);
+        } else {
+            $app->on(Application::EVENT_AFTER_REQUEST, [$this, 'recordRequest']);
+        }
+        // Covers requests that end with exit() before the events above
+        register_shutdown_function([$this, 'recordRequest']);
+    }
+
+    /**
+     * Writes the request row, at most once per request. Read-only requests that changed nothing are skipped.
+     */
+    public function recordRequest(?Event $event = null): void
+    {
+        $app = Yii::$app;
+        if ($this->requestRecorded || $app === null) {
+            return;
+        }
+
+        $isWeb = $app instanceof WebApplication;
+        $method = $isWeb ? strtoupper($app->getRequest()->getMethod()) : self::METHOD_CLI;
+        $route = (string) $app->requestedRoute;
+        if ($this->isIgnoredRoute($route)) {
+            return;
+        }
+        if ($this->changeCount === 0 && !in_array($method, array_map('strtoupper', $this->trackMethods), true)) {
+            return;
+        }
+        $this->requestRecorded = true;
+
+        try {
+            [$userId, $userName] = $this->currentUser();
+            $masker = new ParamsMasker($this->maskParams, $this->maxParamsBytes);
+            $row = [
+                'request_id' => $this->getRequestId(),
+                'created_at' => gmdate('Y-m-d H:i:s', (int) ($this->startedAt ?? time())),
+                'app_id' => $this->appId(),
+                'user_id' => $userId,
+                'user_name' => $userName,
+                'method' => $method,
+                'route' => mb_substr($route, 0, 255),
+                'duration_ms' => $this->startedAt === null
+                    ? null
+                    : (int) round((microtime(true) - $this->startedAt) * 1000),
+            ];
+            $row += $isWeb ? $this->webRequestData($app, $masker) : $this->consoleRequestData($app, $masker);
+
+            $this->insertRow($this->getDb(), self::TABLE_REQUESTS, $row);
+        } catch (Throwable $e) {
+            $this->handleError($e);
+        }
+    }
+
+    public function isRequestRecorded(): bool
+    {
+        return $this->requestRecorded;
     }
 
     /**
@@ -358,6 +432,66 @@ class Audit extends Component implements BootstrapInterface
         }
 
         return isset($identity->username) ? (string) $identity->username : null;
+    }
+
+    private function webRequestData(WebApplication $app, ParamsMasker $masker): array
+    {
+        $request = $app->getRequest();
+        try {
+            $body = (array) $request->getBodyParams();
+        } catch (Throwable $e) {
+            $body = [];
+        }
+        $params = [
+            'get' => $masker->mask($request->getQueryParams()),
+            'post' => $masker->mask($body),
+            'files' => ParamsMasker::describeFiles($_FILES),
+        ];
+        try {
+            $url = (string) $request->getUrl();
+        } catch (Throwable $e) {
+            // Thrown when the server gives no request URI; the row is still worth writing
+            $url = '';
+        }
+        // The query string is left out: query parameters are stored masked in params
+        $path = explode('?', $url, 2)[0];
+        $ip = $this->ipCallback !== null ? call_user_func($this->ipCallback) : $request->getUserIP();
+        $userAgent = $request->getUserAgent();
+
+        return [
+            'url' => mb_substr($path, 0, 2048),
+            'params' => $masker->encode($params),
+            'status_code' => $app->getResponse()->statusCode,
+            'ip' => $ip === null ? null : mb_substr((string) $ip, 0, 45),
+            'user_agent' => $userAgent === null ? null : mb_substr($userAgent, 0, 255),
+        ];
+    }
+
+    private function consoleRequestData(Application $app, ParamsMasker $masker): array
+    {
+        $request = $app->getRequest();
+        $args = $request instanceof ConsoleRequest ? $request->getParams() : [];
+        $response = $app->getResponse();
+
+        return [
+            'url' => '',
+            'params' => $masker->encode(['args' => $masker->maskArgs($args)]),
+            'status_code' => $response instanceof ConsoleResponse ? $response->exitStatus : null,
+            'ip' => null,
+            'user_agent' => null,
+        ];
+    }
+
+    private function isIgnoredRoute(string $route): bool
+    {
+        foreach ($this->ignoreRoutes as $pattern) {
+            $regex = '/^' . str_replace('\*', '.*', preg_quote($pattern, '/')) . '$/';
+            if (preg_match($regex, $route)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
