@@ -7,6 +7,7 @@ return [
     'Attribute' => 'Atributo',
     'Changed attributes' => 'Atributos alterados',
     'Changes' => 'Alterações',
+    'Days must be 1 or more.' => 'O número de dias tem de ser 1 ou mais.',
     'Delete' => 'Eliminação',
     'Duration (ms)' => 'Duração (ms)',
     'From' => 'De',
@@ -35,4 +36,5 @@ return [
     'User agent' => 'Navegador',
     'User ID' => 'ID do utilizador',
     'View' => 'Ver',
+    '{table}: {count} rows deleted' => '{table}: {count} registos eliminados',
 ];
