@@ -50,7 +50,7 @@ $params = ValueFormatter::flatten($request->getParamsArray());
     <?php if ($params === []) { ?>
         <p class="text-muted"><?= Html::encode(Yii::t('audit', '(none)')) ?></p>
     <?php } else { ?>
-        <table class="table table-sm audit-log-params">
+        <table class="table table-sm w-auto audit-log-params">
             <tbody>
                 <?php foreach ($params as $name => $value) { ?>
                     <tr>

@@ -5,6 +5,8 @@
 - Simplify the request detail page: a two-line summary without empty fields, parameters as `key: value` lines,
   and all changes in one table with the recorded model's attribute labels, old values struck through and new
   values in bold.
+- Add the `showTitle` controller option, for layouts that already print the page title.
+- Keep request parameter values next to their keys instead of at the far edge of the page.
 
 ## 1.0.0
 

@@ -14,7 +14,9 @@ $this->title = Yii::t('audit', 'Changes');
 $this->params['breadcrumbs'][] = $this->title;
 ?>
 <div class="audit-log-index">
-    <h1><?= Html::encode($this->title) ?></h1>
+    <?php if ($this->context->showTitle ?? true) { ?>
+        <h1><?= Html::encode($this->title) ?></h1>
+    <?php } ?>
 
     <?= $this->render('_tabs', ['active' => 'index']) ?>
 

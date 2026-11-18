@@ -13,6 +13,8 @@ use yii\web\NotFoundHttpException;
 
 class AuditLogControllerTest extends TestCase
 {
+    private const PAGES = ['audit-log/index' => [], 'audit-log/requests' => [], 'audit-log/view' => ['id' => 'r1']];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -198,6 +200,38 @@ class AuditLogControllerTest extends TestCase
 
         // Stored 10:00 UTC is 11:00 in Lisbon in July
         $this->assertStringContainsString('2026-07-01 11:00:00', $output);
+    }
+
+    public function testPagesShowTitleHeadingByDefault(): void
+    {
+        $this->seed();
+
+        foreach (self::PAGES as $route => $params) {
+            $this->assertStringContainsString('<h1>', Yii::$app->runAction($route, $params), $route);
+        }
+    }
+
+    public function testTitleHeadingCanBeLeftToTheLayout(): void
+    {
+        $this->destroyApp();
+        $this->mockWebApp([], ['controllerMap' => [
+            'audit-log' => ['class' => OpenAuditLogController::class, 'showTitle' => false],
+        ]]);
+        Yii::$app->request->setUrl('/audit-log/index');
+        $this->seed();
+
+        foreach (self::PAGES as $route => $params) {
+            $this->assertStringNotContainsString('<h1>', Yii::$app->runAction($route, $params), $route);
+        }
+    }
+
+    public function testViewParamsTableFitsItsContent(): void
+    {
+        $this->seed();
+
+        $output = Yii::$app->runAction('audit-log/view', ['id' => 'r1']);
+
+        $this->assertMatchesRegularExpression('/<table class="[^"]*\bw-auto\b[^"]*audit-log-params/', $output);
     }
 
     public function testPortugueseTranslation(): void

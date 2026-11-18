@@ -14,7 +14,9 @@ $this->params['breadcrumbs'][] = $this->title;
 $methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', Audit::METHOD_CLI];
 ?>
 <div class="audit-log-requests">
-    <h1><?= Html::encode($this->title) ?></h1>
+    <?php if ($this->context->showTitle ?? true) { ?>
+        <h1><?= Html::encode($this->title) ?></h1>
+    <?php } ?>
 
     <?= $this->render('_tabs', ['active' => 'requests']) ?>
 

@@ -14,7 +14,9 @@ $this->params['breadcrumbs'][] = $this->title;
 $total = $changes->getTotalCount();
 ?>
 <div class="audit-log-view">
-    <h1><?= Html::encode($this->title) ?></h1>
+    <?php if ($this->context->showTitle ?? true) { ?>
+        <h1><?= Html::encode($this->title) ?></h1>
+    <?php } ?>
 
     <?= $this->render('_tabs', ['active' => '']) ?>
 

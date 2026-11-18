@@ -21,6 +21,12 @@ use yii\web\NotFoundHttpException;
  */
 class AuditLogController extends Controller
 {
+    /**
+     * @var bool whether the pages print their title as an `<h1>`. Set it to false when the host layout already shows
+     * the page title.
+     */
+    public bool $showTitle = true;
+
     public function behaviors()
     {
         return [

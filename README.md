@@ -161,6 +161,9 @@ Without a subclass, the controller can be mapped with static rules:
 ],
 ```
 
+Each page prints its title as an `<h1>`. When the application layout already shows `$this->title`, set
+`public bool $showTitle = false;` in the subclass, or `'showTitle' => false` in the `controllerMap` entry.
+
 To change the views, override `getViewPath()` in the subclass or map `@websvc/audit/views/audit-log` in the view
 theme.
 
