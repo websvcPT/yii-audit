@@ -9,6 +9,13 @@ final class ParamsMasker
 {
     public const MASK = '***';
 
+    /**
+     * Deepest array nesting kept. MySQL JSON columns reject documents nested deeper than 100 levels.
+     */
+    public const MAX_DEPTH = 32;
+
+    public const DEPTH_MARKER = '[depth limit]';
+
     private const JSON_FLAGS = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
         | JSON_PARTIAL_OUTPUT_ON_ERROR;
 
@@ -27,16 +34,22 @@ final class ParamsMasker
     }
 
     /**
-     * Masks matching keys at any depth. A matching key masks its whole value.
+     * Masks matching keys at any depth. A matching key masks its whole value. Arrays nested deeper than
+     * MAX_DEPTH are replaced by DEPTH_MARKER.
      */
     public function mask(array $params): array
+    {
+        return $this->maskLevel($params, 1);
+    }
+
+    private function maskLevel(array $params, int $depth): array
     {
         $result = [];
         foreach ($params as $key => $value) {
             if ($this->isMasked((string) $key)) {
                 $result[$key] = self::MASK;
             } elseif (is_array($value)) {
-                $result[$key] = $this->mask($value);
+                $result[$key] = $depth >= self::MAX_DEPTH ? self::DEPTH_MARKER : $this->maskLevel($value, $depth + 1);
             } else {
                 $result[$key] = $value;
             }

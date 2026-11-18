@@ -26,9 +26,13 @@ final class ChangeBuilder
     /**
      * @param string[] $ignoreAttributes attributes left out of the result
      * @param string[] $maskAttributes attributes whose values are replaced by the mask
+     * @param int $maxValueBytes longer values are cut and marked; 0 keeps every value whole
      */
-    public function __construct(array $ignoreAttributes = [], array $maskAttributes = [])
-    {
+    public function __construct(
+        array $ignoreAttributes = [],
+        array $maskAttributes = [],
+        private int $maxValueBytes = 0
+    ) {
         $this->ignore = array_fill_keys($ignoreAttributes, true);
         $this->mask = array_fill_keys($maskAttributes, true);
     }
@@ -71,7 +75,8 @@ final class ChangeBuilder
                 $new = $new === null ? null : self::MASK;
             }
 
-            $changes[$name] = ['old' => $old, 'new' => $new];
+            // Cut after comparing, so a change beyond the limit is still detected
+            $changes[$name] = ['old' => $this->truncate($old), 'new' => $this->truncate($new)];
         }
 
         return $changes === [] ? null : $changes;
@@ -105,8 +110,31 @@ final class ChangeBuilder
     }
 
     /**
-     * Values are equal when both are null, or have the same string form, or are the same number.
-     * `1` equals `"1"`; `null` does not equal `""`.
+     * Cuts strings, and arrays encoded as JSON, that are longer than the limit.
+     */
+    private function truncate(mixed $value): mixed
+    {
+        if ($this->maxValueBytes <= 0) {
+            return $value;
+        }
+        if (is_array($value)) {
+            $json = (string) json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (strlen($json) <= $this->maxValueBytes) {
+                return $value;
+            }
+            $value = $json;
+        }
+        if (!is_string($value) || strlen($value) <= $this->maxValueBytes) {
+            return $value;
+        }
+
+        return mb_strcut($value, 0, $this->maxValueBytes, 'UTF-8') . ' [truncated, ' . strlen($value) . ' bytes]';
+    }
+
+    /**
+     * Values are equal when both are null, or both are strings with the same content, or, when at least one is not a
+     * string, they have the same string form or are the same number. `1` equals `"1"`; `"0123"` does not equal
+     * `"123"`; `null` does not equal `""`.
      */
     private function isEqual(mixed $a, mixed $b): bool
     {
@@ -115,6 +143,10 @@ final class ChangeBuilder
         }
         if (is_array($a) || is_array($b)) {
             return json_encode($a) === json_encode($b);
+        }
+        if (is_string($a) && is_string($b)) {
+            // Codes, postal codes and phone numbers look numeric but are compared as text
+            return $a === $b;
         }
 
         $a = is_bool($a) ? (int) $a : $a;

@@ -3,6 +3,7 @@
 namespace websvc\audit\tests\unit;
 
 use websvc\audit\tests\data\models\Post;
+use websvc\audit\tests\data\models\User;
 use websvc\audit\tests\TestCase;
 use Yii;
 use yii\base\Application;
@@ -12,16 +13,100 @@ class AuditRequestTest extends TestCase
 {
     private array $serverBackup = [];
 
+    private array $postBackup = [];
+
     protected function setUp(): void
     {
         parent::setUp();
         $this->serverBackup = $_SERVER;
+        $this->postBackup = $_POST;
     }
 
     protected function tearDown(): void
     {
         $_SERVER = $this->serverBackup;
+        $_POST = $this->postBackup;
         parent::tearDown();
+    }
+
+    public function testRequestRowSurvivesTransactionLeftOpen(): void
+    {
+        $this->web('POST', 'post/create');
+        $transaction = $this->db()->beginTransaction();
+        (new Post(['title' => 'A']))->save(false);
+
+        $this->send(500);
+        // What the server does on disconnect with a transaction still open
+        $transaction->rollBack();
+
+        $this->assertCount(1, $this->auditRows('audit_requests'));
+        $this->assertSame([], $this->auditRows('audit_changes'));
+    }
+
+    public function testMethodOverrideCannotHideWrite(): void
+    {
+        $_SERVER['HTTP_X_HTTP_METHOD_OVERRIDE'] = 'GET';
+        $this->web('POST', 'post/create');
+
+        $this->send(200);
+
+        $this->assertCount(1, $this->auditRows('audit_requests'));
+    }
+
+    public function testLongMethodIsTruncated(): void
+    {
+        $_POST['_method'] = 'ABCDEFGHIJKLMNOP';
+        $this->web('POST', 'post/create');
+
+        $this->send(200);
+
+        $this->assertSame('ABCDEFGHIJ', $this->auditRows('audit_requests')[0]['method']);
+    }
+
+    public function testUserIsTakenBeforeTheResponseIsSent(): void
+    {
+        $this->web('POST', 'site/logout');
+        Yii::$app->user->setIdentity(new User(['id' => 7, 'username' => 'ana']));
+        Yii::$app->getResponse()->trigger(Response::EVENT_BEFORE_SEND);
+        Yii::$app->user->setIdentity(null);
+
+        $this->send(200);
+
+        $this->assertSame('7', $this->auditRows('audit_requests')[0]['user_id']);
+    }
+
+    public function testWebExitBeforeSendHasNoStatus(): void
+    {
+        $this->web('POST', 'post/create');
+
+        Yii::$app->get('audit')->recordRequest();
+
+        $this->assertNull($this->auditRows('audit_requests')[0]['status_code']);
+    }
+
+    public function testConsoleCrashIsNotRecordedAsSuccess(): void
+    {
+        $this->console('import/run');
+        (new Post(['title' => 'A']))->save(false);
+
+        // Called the way the shutdown function calls it, without the after-request event
+        Yii::$app->get('audit')->recordRequest();
+
+        $this->assertNull($this->auditRows('audit_requests')[0]['status_code']);
+    }
+
+    public function testDeeplyNestedParamsAreStored(): void
+    {
+        $this->web('POST', 'api/import');
+        $nested = 'leaf';
+        for ($i = 0; $i < 150; $i++) {
+            $nested = ['level' => $nested];
+        }
+        Yii::$app->request->setBodyParams(['data' => $nested]);
+
+        $this->send(200);
+
+        $this->assertCount(1, $this->auditRows('audit_requests'));
     }
 
     public function testPostWritesRequestRow(): void
@@ -116,14 +201,17 @@ class AuditRequestTest extends TestCase
     public function testLongValuesAreTruncated(): void
     {
         $_SERVER['HTTP_USER_AGENT'] = str_repeat('u', 400);
-        $this->web('POST', 'post/create', [], false);
+        $this->web('POST', str_repeat('r', 300), [], false);
         Yii::$app->request->setUrl('/' . str_repeat('p', 3000));
+        Yii::$app->user->setIdentity(new User(['id' => 7, 'username' => str_repeat('n', 300)]));
 
         $this->send(200);
 
         $row = $this->auditRows('audit_requests')[0];
         $this->assertSame(255, strlen($row['user_agent']));
         $this->assertSame(2048, strlen($row['url']));
+        $this->assertSame(255, strlen($row['route']));
+        $this->assertSame(255, strlen($row['user_name']));
     }
 
     public function testConsoleRunWithChangesWritesCliRow(): void

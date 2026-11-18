@@ -25,7 +25,7 @@ $methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', Audit::METHOD_CLI];
             [
                 'attribute' => 'created_at',
                 'value' => static fn(AuditRequest $model): string => Yii::$app->formatter->asDatetime(
-                    $model->created_at,
+                    $model->created_at . ' UTC',
                     'php:Y-m-d H:i:s'
                 ),
                 'filter' => Html::activeInput('date', $searchModel, 'created_from', ['class' => 'form-control'])

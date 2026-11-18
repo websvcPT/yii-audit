@@ -25,7 +25,7 @@ $this->params['breadcrumbs'][] = $this->title;
             [
                 'attribute' => 'created_at',
                 'value' => static fn(AuditChange $model): string => Yii::$app->formatter->asDatetime(
-                    $model->created_at,
+                    $model->created_at . ' UTC',
                     'php:Y-m-d H:i:s'
                 ),
                 'filter' => Html::activeInput('date', $searchModel, 'created_from', ['class' => 'form-control'])
@@ -65,11 +65,13 @@ $this->params['breadcrumbs'][] = $this->title;
                 'filter' => Html::activeTextInput($searchModel, 'field', ['class' => 'form-control']),
             ],
             [
+                'label' => Yii::t('audit', 'Request'),
                 'format' => 'raw',
                 'value' => static fn(AuditChange $model): string => Html::a(
                     Html::encode(Yii::t('audit', 'View')),
                     ['view', 'id' => $model->request_id]
                 ),
+                'filter' => Html::activeTextInput($searchModel, 'request_id', ['class' => 'form-control']),
             ],
         ],
     ]) ?>

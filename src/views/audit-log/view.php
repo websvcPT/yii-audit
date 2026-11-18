@@ -2,11 +2,12 @@
 
 use yii\helpers\Html;
 use yii\widgets\DetailView;
+use yii\widgets\LinkPager;
 
 /** @var yii\web\View $this */
 /** @var string $id */
 /** @var websvc\audit\models\AuditRequest|null $request */
-/** @var websvc\audit\models\AuditChange[] $changes */
+/** @var yii\data\ActiveDataProvider $changes */
 
 $this->title = Yii::t('audit', 'Request {id}', ['id' => $id]);
 $this->params['breadcrumbs'][] = ['label' => Yii::t('audit', 'Requests'), 'url' => ['requests']];
@@ -24,7 +25,7 @@ $jsonFlags = JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
             'attributes' => [
                 [
                     'attribute' => 'created_at',
-                    'value' => Yii::$app->formatter->asDatetime($request->created_at, 'php:Y-m-d H:i:s'),
+                    'value' => Yii::$app->formatter->asDatetime($request->created_at . ' UTC', 'php:Y-m-d H:i:s'),
                 ],
                 [
                     'attribute' => 'user_name',
@@ -54,7 +55,9 @@ $jsonFlags = JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
 
     <h2><?= Html::encode(Yii::t('audit', 'Changes')) ?></h2>
 
-    <?php foreach ($changes as $change) { ?>
+    <?php foreach ($changes->getModels() as $change) { ?>
         <?= $this->render('_changes', ['change' => $change]) ?>
     <?php } ?>
+
+    <?= LinkPager::widget(['pagination' => $changes->getPagination()]) ?>
 </div>

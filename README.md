@@ -64,8 +64,9 @@ bootstrap it:
 | `maskAttributes` | `password`, `password_hash`, `auth_key`, `password_reset_token`, `verification_token`, `access_token` | Recorded as changed, with the value replaced by `***` |
 | `trackMethods` | `['POST', 'PUT', 'PATCH', 'DELETE']` | Methods that always get a request row. Add `CLI` to record every console run |
 | `ignoreRoutes` | `['debug/*', 'gii/*']` | Routes that never get a request row (`*` matches anything) |
-| `maskParams` | `password`, `token`, `secret`, `csrf`, `auth_key`, `api_key` | Parameter keys whose values become `***` (case-insensitive, partial match, any depth) |
+| `maskParams` | `password`, `passwd`, `pwd`, `token`, `secret`, `csrf`, `auth_key`, `api_key` | Parameter keys whose values become `***` (case-insensitive, partial match, any depth) |
 | `maxParamsBytes` | `65536` | Larger parameter payloads are replaced by a marker that lists the top-level keys |
+| `maxValueBytes` | `16384` | Longer attribute values are cut and marked. `0` keeps every value whole |
 | `userNameCallback` | `null` | `callable(IdentityInterface $identity): ?string`. Defaults to the identity's `username` |
 | `ipCallback` | `null` | `callable(): ?string`. Defaults to `Request::getUserIP()` |
 | `failSilently` | `true` | Log audit write errors (category `audit`) instead of breaking the request |
@@ -187,6 +188,23 @@ php yii audit/cleanup 365
 - Each write request adds one insert at the end of the request.
 - Each tracked save adds one insert. Inside a transaction it adds no commit of its own.
 - Rows are inserted with plain SQL, so no table schema is loaded.
+
+## Limits
+
+- Every model connection that is tracked must reach the audit database on the same server. Exclude models that use
+  another server, or their saves log an `audit` error each time.
+- A request row is written once, at the end of the request. Long-running console workers (queue listeners) share one
+  request id and write their request row only when they exit.
+- When a request ends with a transaction still open, its request row is written through a separate connection, and
+  the change rows inside that transaction disappear with it.
+- A request counts as a write when either the method the application used or the method sent on the wire is in
+  `trackMethods`, so `_method` and `X-Http-Method-Override` cannot hide a write.
+- Request parameters nested deeper than 32 levels are replaced by `[depth limit]`.
+- Attribute values are compared before they are cut, so a change beyond `maxValueBytes` is still recorded.
+- Two strings are compared as text (`"0123"` and `"123"` differ). A number and a string are compared as numbers
+  (`1` and `"1"` are equal).
+- The status code is empty when the request ended without sending a response (for example `exit()` or a console
+  crash).
 
 ## Development
 

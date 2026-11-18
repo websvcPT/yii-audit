@@ -118,12 +118,17 @@ class Audit extends Component implements BootstrapInterface
      *
      * @var string[]
      */
-    public array $maskParams = ['password', 'token', 'secret', 'csrf', 'auth_key', 'api_key'];
+    public array $maskParams = ['password', 'passwd', 'pwd', 'token', 'secret', 'csrf', 'auth_key', 'api_key'];
 
     /**
      * Parameter payloads larger than this (as JSON) are replaced by a truncation marker.
      */
     public int $maxParamsBytes = 65536;
+
+    /**
+     * Recorded attribute values longer than this are cut and marked. 0 keeps every value whole.
+     */
+    public int $maxValueBytes = 16384;
 
     /**
      * `callable(\yii\web\IdentityInterface $identity): ?string` returning the name stored with each row.
@@ -152,6 +157,11 @@ class Audit extends Component implements BootstrapInterface
     private bool $requestRecorded = false;
 
     private ?float $startedAt = null;
+
+    /**
+     * @var array{0: ?string, 1: ?string}|null user captured before the response was sent
+     */
+    private ?array $requestUser = null;
 
     public function init(): void
     {
@@ -205,6 +215,8 @@ class Audit extends Component implements BootstrapInterface
         }
 
         if ($app instanceof WebApplication) {
+            // The user is read before sending, while the session may still start
+            $app->getResponse()->on(Response::EVENT_BEFORE_SEND, [$this, 'captureRequestUser']);
             // Also fires when the error handler sends an error page
             $app->getResponse()->on(Response::EVENT_AFTER_SEND, [$this, 'recordRequest']);
         } else {
@@ -215,28 +227,34 @@ class Audit extends Component implements BootstrapInterface
     }
 
     /**
+     * Remembers the user of a request that will be recorded. Read-only requests are left alone.
+     */
+    public function captureRequestUser(): void
+    {
+        if ($this->requestRecorded || Yii::$app === null || !$this->shouldRecordRequest(Yii::$app)) {
+            return;
+        }
+        $this->requestUser = $this->currentUser(true);
+    }
+
+    /**
      * Writes the request row, at most once per request. Read-only requests that changed nothing are skipped.
+     *
+     * @param Event|null $event the after-send or after-request event; null when called at shutdown, in which case the
+     * response status is unknown
      */
     public function recordRequest(?Event $event = null): void
     {
         $app = Yii::$app;
-        if ($this->requestRecorded || $app === null) {
-            return;
-        }
-
-        $isWeb = $app instanceof WebApplication;
-        $method = $isWeb ? strtoupper($app->getRequest()->getMethod()) : self::METHOD_CLI;
-        $route = (string) $app->requestedRoute;
-        if ($this->isIgnoredRoute($route)) {
-            return;
-        }
-        if ($this->changeCount === 0 && !in_array($method, array_map('strtoupper', $this->trackMethods), true)) {
+        if ($this->requestRecorded || $app === null || !$this->shouldRecordRequest($app)) {
             return;
         }
         $this->requestRecorded = true;
 
+        $isWeb = $app instanceof WebApplication;
         try {
-            [$userId, $userName] = $this->currentUser();
+            // After sending, the session must not start: headers are already out
+            [$userId, $userName] = $this->requestUser ?? $this->currentUser(!$isWeb);
             $masker = new ParamsMasker($this->maskParams, $this->maxParamsBytes);
             $row = [
                 'request_id' => $this->getRequestId(),
@@ -244,18 +262,75 @@ class Audit extends Component implements BootstrapInterface
                 'app_id' => $this->appId(),
                 'user_id' => $userId,
                 'user_name' => $userName,
-                'method' => $method,
-                'route' => mb_substr($route, 0, 255),
+                'method' => mb_substr($this->requestMethods($app)[0], 0, 10),
+                'route' => mb_substr((string) $app->requestedRoute, 0, 255),
                 'duration_ms' => $this->startedAt === null
                     ? null
                     : (int) round((microtime(true) - $this->startedAt) * 1000),
             ];
-            $row += $isWeb ? $this->webRequestData($app, $masker) : $this->consoleRequestData($app, $masker);
+            $row += $isWeb
+                ? $this->webRequestData($app, $masker, $event !== null)
+                : $this->consoleRequestData($app, $masker, $event !== null);
 
-            $this->insertRow($this->getDb(), self::TABLE_REQUESTS, $row);
+            $this->insertRequestRow($row);
         } catch (Throwable $e) {
             $this->handleError($e);
         }
+    }
+
+    /**
+     * A transaction left open at this point is rolled back when the connection closes, so the row is written
+     * through a separate connection instead.
+     */
+    private function insertRequestRow(array $row): void
+    {
+        $db = $this->getDb();
+        $transaction = $db->getTransaction();
+        if ($transaction === null || !$transaction->getIsActive()) {
+            $this->insertRow($db, self::TABLE_REQUESTS, $row);
+
+            return;
+        }
+
+        $separate = clone $db;
+        try {
+            $this->insertRow($separate, self::TABLE_REQUESTS, $row);
+        } finally {
+            $separate->close();
+        }
+    }
+
+    private function shouldRecordRequest(Application $app): bool
+    {
+        if ($this->isIgnoredRoute((string) $app->requestedRoute)) {
+            return false;
+        }
+        if ($this->changeCount > 0) {
+            return true;
+        }
+        $tracked = array_map('strtoupper', $this->trackMethods);
+        foreach ($this->requestMethods($app) as $method) {
+            if (in_array($method, $tracked, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @return array{0: string, 1: string} the method the application used and the method sent on the wire; they
+     * differ when `_method` or `X-Http-Method-Override` is used, which must not hide a write
+     */
+    private function requestMethods(Application $app): array
+    {
+        if (!$app instanceof WebApplication) {
+            return [self::METHOD_CLI, self::METHOD_CLI];
+        }
+        $method = strtoupper($app->getRequest()->getMethod());
+        $wire = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : $method;
+
+        return [$method, $wire];
     }
 
     public function isRequestRecorded(): bool
@@ -340,7 +415,8 @@ class Audit extends Component implements BootstrapInterface
         try {
             $builder = new ChangeBuilder(
                 array_merge($this->ignoreAttributes, $ignoreAttributes),
-                array_merge($this->maskAttributes, $maskAttributes)
+                array_merge($this->maskAttributes, $maskAttributes),
+                $this->maxValueBytes
             );
             $attributes = $model->getAttributes();
             if ($action === self::ACTION_INSERT) {
@@ -358,7 +434,7 @@ class Audit extends Component implements BootstrapInterface
                 return;
             }
 
-            [$userId, $userName] = $this->currentUser();
+            [$userId, $userName] = $this->currentUser(true);
             $this->insertRow($db, self::TABLE_CHANGES, [
                 'request_id' => $this->getRequestId(),
                 'created_at' => gmdate('Y-m-d H:i:s'),
@@ -407,7 +483,9 @@ class Audit extends Component implements BootstrapInterface
         if (!$this->failSilently) {
             throw $e;
         }
-        Yii::error('Audit write failed: ' . get_class($e) . ': ' . $e->getMessage(), 'audit');
+        // Only the first line: database exceptions append the SQL with the recorded values, which must not reach logs
+        $message = mb_substr(strtok($e->getMessage(), "\n") ?: '', 0, 500);
+        Yii::error('Audit write failed: ' . get_class($e) . ': ' . $message, 'audit');
     }
 
     protected function appId(): string
@@ -416,21 +494,25 @@ class Audit extends Component implements BootstrapInterface
     }
 
     /**
+     * @param bool $mayLoadIdentity whether the identity may be loaded from the session or cookie (web only)
      * @return array{0: ?string, 1: ?string} user id and user name of the logged-in user
      */
-    protected function currentUser(): array
+    protected function currentUser(bool $mayLoadIdentity): array
     {
         $app = Yii::$app;
         if ($app === null || !$app->has('user')) {
             return [null, null];
         }
-        $user = $app->get('user', false);
-        if (!$user instanceof User) {
+        try {
+            $user = $app->get('user', false);
+            if (!$user instanceof User) {
+                return [null, null];
+            }
+            $identity = $user->getIdentity($mayLoadIdentity && $app instanceof WebApplication);
+        } catch (Throwable $e) {
+            // A web application without a usable user component still gets its rows
             return [null, null];
         }
-
-        // Only web requests may load the identity from the session or cookie here
-        $identity = $user->getIdentity($app instanceof WebApplication);
         if ($identity === null) {
             return [null, null];
         }
@@ -455,7 +537,10 @@ class Audit extends Component implements BootstrapInterface
         return isset($identity->username) ? (string) $identity->username : null;
     }
 
-    private function webRequestData(WebApplication $app, ParamsMasker $masker): array
+    /**
+     * @param bool $sent whether the response was sent; otherwise the status is unknown
+     */
+    private function webRequestData(WebApplication $app, ParamsMasker $masker, bool $sent): array
     {
         $request = $app->getRequest();
         try {
@@ -482,13 +567,16 @@ class Audit extends Component implements BootstrapInterface
         return [
             'url' => mb_substr($path, 0, 2048),
             'params' => $masker->encode($params),
-            'status_code' => $app->getResponse()->statusCode,
+            'status_code' => $sent || $app->getResponse()->isSent ? $app->getResponse()->statusCode : null,
             'ip' => $ip === null ? null : mb_substr((string) $ip, 0, 45),
             'user_agent' => $userAgent === null ? null : mb_substr($userAgent, 0, 255),
         ];
     }
 
-    private function consoleRequestData(Application $app, ParamsMasker $masker): array
+    /**
+     * @param bool $finished whether the run reached the after-request event; otherwise it crashed or called exit()
+     */
+    private function consoleRequestData(Application $app, ParamsMasker $masker, bool $finished): array
     {
         $request = $app->getRequest();
         $args = $request instanceof ConsoleRequest ? $request->getParams() : [];
@@ -497,7 +585,7 @@ class Audit extends Component implements BootstrapInterface
         return [
             'url' => '',
             'params' => $masker->encode(['args' => $masker->maskArgs($args)]),
-            'status_code' => $response instanceof ConsoleResponse ? $response->exitStatus : null,
+            'status_code' => $finished && $response instanceof ConsoleResponse ? $response->exitStatus : null,
             'ip' => null,
             'user_agent' => null,
         ];

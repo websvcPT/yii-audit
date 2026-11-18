@@ -163,6 +163,44 @@ class AuditBehaviorTest extends TestCase
         (new Post(['title' => 'B']))->save(false);
     }
 
+    public function testAuditErrorLogOmitsSqlAndValues(): void
+    {
+        $this->db()->createCommand('DROP TABLE ' . $this->auditDatabase() . '.audit_changes')->execute();
+
+        (new Post(['title' => 'secret-value']))->save(false);
+
+        $messages = array_column(array_filter(
+            Yii::getLogger()->messages,
+            static fn(array $message): bool => $message[2] === 'audit'
+        ), 0);
+        $this->assertNotEmpty($messages);
+        foreach ($messages as $message) {
+            $this->assertStringNotContainsString('secret-value', $message);
+            $this->assertStringNotContainsString('INSERT INTO', $message);
+        }
+    }
+
+    public function testWebAppWithoutUserComponentStillRecords(): void
+    {
+        $this->destroyApp();
+        $this->mockWebApp(['failSilently' => false], ['components' => ['user' => ['identityClass' => null]]]);
+
+        (new Post(['title' => 'A']))->save(false);
+
+        $this->assertNull($this->auditRows('audit_changes')[0]['user_id']);
+    }
+
+    public function testLongValuesAreCapped(): void
+    {
+        $this->destroyApp();
+        $this->mockConsoleApp(['maxValueBytes' => 10]);
+
+        (new Post(['title' => 'A', 'body' => str_repeat('a', 50)]))->save(false);
+
+        $changes = json_decode($this->auditRows('audit_changes')[0]['changes'], true);
+        $this->assertSame('aaaaaaaaaa [truncated, 50 bytes]', $changes['body']['new']);
+    }
+
     public function testBehaviorListsMergeWithComponentLists(): void
     {
         $this->destroyApp();

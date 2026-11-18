@@ -25,6 +25,7 @@ $actions = [
     'delete' => Yii::t('audit', 'Delete'),
 ];
 $values = $change->getChangesArray();
+$time = Yii::$app->formatter->asDatetime($change->created_at . ' UTC', 'php:Y-m-d H:i:s');
 ksort($values);
 ?>
 <div class="audit-log-change">
@@ -34,7 +35,7 @@ ksort($values);
             'title' => $change->model_class,
         ]) ?>
         <?= Html::encode($change->record_id === null ? '' : '#' . $change->record_id) ?>
-        <small><?= Html::encode(Yii::$app->formatter->asDatetime($change->created_at, 'php:Y-m-d H:i:s')) ?></small>
+        <small><?= Html::encode($time) ?></small>
     </h3>
     <table class="table table-striped table-bordered">
         <thead>

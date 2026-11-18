@@ -11,7 +11,7 @@ class OpenAuditLogController extends AuditLogController
 {
     public $layout = false;
 
-    public function behaviors(): array
+    public function behaviors()
     {
         return [];
     }

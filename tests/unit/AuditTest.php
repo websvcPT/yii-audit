@@ -16,6 +16,14 @@ class AuditTest extends TestCase
         $this->assertSame('audit_changes', $audit->tableName(Audit::TABLE_CHANGES));
     }
 
+    public function testDefaultMaskParamsCoverCommonPasswordNames(): void
+    {
+        $audit = new Audit();
+
+        $this->assertContains('passwd', $audit->maskParams);
+        $this->assertContains('pwd', $audit->maskParams);
+    }
+
     public function testRequestIdIsStableHex(): void
     {
         $audit = new Audit();

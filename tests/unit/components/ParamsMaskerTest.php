@@ -53,6 +53,25 @@ class ParamsMaskerTest extends TestCase
         $this->assertNotNull(json_decode($json, true));
     }
 
+    public function testDeepNestingIsCut(): void
+    {
+        $nested = 'leaf';
+        for ($i = 0; $i < 150; $i++) {
+            $nested = ['level' => $nested];
+        }
+
+        $masked = (new ParamsMasker(self::MASK_KEYS, 65536))->mask(['data' => $nested]);
+
+        $depth = 0;
+        $node = $masked;
+        while (is_array($node)) {
+            $node = reset($node);
+            $depth++;
+        }
+        $this->assertSame(ParamsMasker::MAX_DEPTH, $depth);
+        $this->assertSame(ParamsMasker::DEPTH_MARKER, $node);
+    }
+
     public function testDescribeFilesFlattensSingleAndMultiple(): void
     {
         $files = [

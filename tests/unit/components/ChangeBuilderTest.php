@@ -38,6 +38,33 @@ class ChangeBuilderTest extends TestCase
         $this->assertNull((new ChangeBuilder())->build('update', ['price' => '1.50'], ['price' => 1.5]));
     }
 
+    public function testStringChangesAreComparedAsStrings(): void
+    {
+        $result = (new ChangeBuilder())->build(
+            'update',
+            ['zip' => '0123', 'code' => '0e123', 'amount' => '1e3'],
+            ['zip' => '123', 'code' => '0e456', 'amount' => '1000']
+        );
+
+        $this->assertSame(['zip', 'code', 'amount'], array_keys($result));
+    }
+
+    public function testLongValuesAreTruncated(): void
+    {
+        $builder = new ChangeBuilder([], [], 10);
+
+        $result = $builder->build('insert', [], [
+            'body' => str_repeat('a', 50),
+            'data' => ['x' => str_repeat('b', 50)],
+            'name' => str_repeat('é', 10),
+        ]);
+
+        $this->assertSame('aaaaaaaaaa [truncated, 50 bytes]', $result['body']['new']);
+        $this->assertStringStartsWith('{"x":"bbbb', $result['data']['new']);
+        $this->assertStringEndsWith('[truncated, 58 bytes]', $result['data']['new']);
+        $this->assertSame('ééééé [truncated, 20 bytes]', $result['name']['new']);
+    }
+
     public function testIgnoredOnlyUpdateReturnsNull(): void
     {
         $builder = new ChangeBuilder(['updated_at']);

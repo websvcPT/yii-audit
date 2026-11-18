@@ -2,6 +2,7 @@
 
 namespace websvc\audit\tests\unit\controllers;
 
+use ReflectionMethod;
 use websvc\audit\controllers\AuditLogController;
 use websvc\audit\tests\data\controllers\OpenAuditLogController;
 use websvc\audit\tests\TestCase;
@@ -72,6 +73,54 @@ class AuditLogControllerTest extends TestCase
 
         $this->assertStringContainsString('&lt;script&gt;alert(1)&lt;/script&gt;', $output);
         $this->assertStringNotContainsString('<script>alert(1)', $output);
+    }
+
+    public function testSubclassMayOmitReturnTypes(): void
+    {
+        foreach (['behaviors', 'getViewPath'] as $method) {
+            $this->assertFalse((new ReflectionMethod(AuditLogController::class, $method))->hasReturnType(), $method);
+        }
+    }
+
+    public function testIndexHasRequestIdFilter(): void
+    {
+        $this->seed();
+
+        $output = Yii::$app->runAction('audit-log/index');
+
+        $this->assertStringContainsString('name="AuditChangeSearch[request_id]"', $output);
+    }
+
+    public function testViewPaginatesChanges(): void
+    {
+        $this->seed();
+        for ($i = 0; $i < 59; $i++) {
+            $this->insertAuditRow('audit_changes', [
+                'request_id' => 'r1',
+                'created_at' => '2026-07-01 10:00:00',
+                'app_id' => 'backend',
+                'action' => 'insert',
+                'model_class' => 'app\models\InvoiceLine',
+                'table_name' => 'invoice_lines',
+                'record_id' => (string) $i,
+                'changes' => ['qty' => ['old' => null, 'new' => $i]],
+            ]);
+        }
+
+        $output = Yii::$app->runAction('audit-log/view', ['id' => 'r1']);
+
+        $this->assertSame(50, substr_count($output, 'class="audit-log-change"'));
+    }
+
+    public function testTimesIgnoreFormatterDefaultTimeZone(): void
+    {
+        Yii::$app->formatter->defaultTimeZone = 'Europe/Lisbon';
+        $this->seed();
+
+        $output = Yii::$app->runAction('audit-log/index');
+
+        // Stored 10:00 UTC is 11:00 in Lisbon in July
+        $this->assertStringContainsString('2026-07-01 11:00:00', $output);
     }
 
     public function testPortugueseTranslation(): void
