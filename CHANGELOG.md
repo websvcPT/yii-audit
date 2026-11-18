@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.0 (unreleased)
+## 1.1.0
 
 - Simplify the request detail page: a two-line summary without empty fields, parameters as `key: value` lines,
   and all changes in one table with the recorded model's attribute labels, old values struck through and new
