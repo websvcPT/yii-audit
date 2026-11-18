@@ -3,10 +3,12 @@
 namespace websvc\audit\tests;
 
 use PHPUnit\Framework\TestCase as BaseTestCase;
+use websvc\audit\Audit;
 use Yii;
 use yii\base\Event;
 use yii\console\Application as ConsoleApplication;
 use yii\db\Connection;
+use yii\db\Migration;
 use yii\di\Container;
 use yii\helpers\ArrayHelper;
 use yii\web\Application as WebApplication;
@@ -114,6 +116,49 @@ abstract class TestCase extends BaseTestCase
         return $db->createCommand('SELECT * FROM ' . $db->quoteTableName($name) . ' ORDER BY id')->queryAll();
     }
 
+    /**
+     * Applies the package migrations. Classes are instantiated directly because the migrate command writes its
+     * progress straight to STDOUT.
+     */
+    protected function migrateAudit(): void
+    {
+        $this->dropAuditTables();
+        foreach ($this->auditMigrationClasses() as $class) {
+            $this->runMigration(new $class(), 'up');
+        }
+    }
+
+    protected function migrateAuditDown(): void
+    {
+        foreach (array_reverse($this->auditMigrationClasses()) as $class) {
+            $this->runMigration(new $class(), 'down');
+        }
+    }
+
+    protected function dropAuditTables(): void
+    {
+        $db = $this->db();
+        foreach ([$this->appDatabase(), $this->auditDatabase()] as $database) {
+            foreach (['audit_changes', 'audit_requests'] as $table) {
+                $db->createCommand('DROP TABLE IF EXISTS ' . $db->quoteTableName($database . '.' . $table))->execute();
+            }
+        }
+    }
+
+    /**
+     * @return string[]
+     */
+    protected function auditMigrationClasses(): array
+    {
+        $files = glob(dirname(__DIR__) . '/src/migrations/M*.php');
+        sort($files);
+
+        return array_map(
+            static fn(string $file): string => 'websvc\audit\migrations\\' . basename($file, '.php'),
+            $files
+        );
+    }
+
     protected function appDatabase(): string
     {
         return getenv('DB_APP') ?: 'audit_app';
@@ -124,12 +169,23 @@ abstract class TestCase extends BaseTestCase
         return getenv('DB_AUDIT') ?: 'audit_log';
     }
 
+    private function runMigration(Migration $migration, string $direction): void
+    {
+        ob_start();
+        try {
+            $migration->$direction();
+        } finally {
+            ob_end_clean();
+        }
+    }
+
     private function baseConfig(array $auditConfig): array
     {
         $host = getenv('DB_HOST') ?: 'mysql';
 
         return [
             'id' => 'test-app',
+            'bootstrap' => ['audit'],
             'basePath' => dirname(__DIR__),
             'vendorPath' => dirname(__DIR__) . '/vendor',
             'runtimePath' => __DIR__ . '/runtime',
@@ -142,6 +198,10 @@ abstract class TestCase extends BaseTestCase
                     'password' => getenv('DB_PASSWORD') ?: 'audit',
                     'charset' => 'utf8mb4',
                 ],
+                'audit' => array_merge(
+                    ['class' => Audit::class, 'database' => $this->auditDatabase()],
+                    $auditConfig
+                ),
             ],
         ];
     }
